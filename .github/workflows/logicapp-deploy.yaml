@@ -1,0 +1,83 @@
+name: Reusable workflow for deploying logic app workflows
+
+on:
+  workflow_call:
+    inputs:      
+      AZURE_TENANT_ID:
+        description: "The tenant id"
+        required: true
+        type: string
+      AZURE_RESOURCE_GROUP:
+        description: "The resource group"
+        required: true
+        type: string
+      LA_NAME:
+        description: "The name of Logic App"
+        required: true
+        type: string
+      GITHUB_ENVIRONMENT:
+        required: true
+        type: string
+      ARM_SUBSCRIPTION_ID:
+        required: true
+        type: string
+      ARM_CLIENT_ID:
+        description: "Service Principal client id"
+        required: true
+        type: string
+    secrets:
+      ARM_CLIENT_SECRET:
+        description: "Service Principal password"
+        required: true     
+    outputs:
+      SECRET_JSON:
+        description: "The json file that stores secret names"
+        value: ${{ jobs.deploy_logicapp.outputs.secrets }}
+jobs:
+  deploy_logicapp: 
+    # The type of runner that the job will run on
+    runs-on: [ self-hosted ]
+    environment: "${{ inputs.GITHUB_ENVIRONMENT }}"
+
+    outputs:
+      secrets: ${{ steps.secret_app_settings_output.outputs.secretJson }}
+    
+    steps:
+      - name: Download a Build Artifact
+        uses: actions/download-artifact@v2.0.8
+        with:
+          # Artifact name
+          name: 'logic'
+          # Destination path
+          path: ./deploy
+        
+      - name: Azure CLI Login
+        run: |
+          az login --service-principal -u ${{ inputs.ARM_CLIENT_ID }} -p ${{ secrets.ARM_CLIENT_SECRET }} --tenant ${{ inputs.AZURE_TENANT_ID }}
+          az account set -s ${{ inputs.ARM_SUBSCRIPTION_ID }}
+
+      # Adding -o to overwrite files from previous environment runs
+      - name: unzip artifact
+        run: |
+          unzip -o './deploy/logic.zip' -d './deploy/settings'
+
+      - name: Deploy to Azure Logic App
+        run: |
+          az functionapp deployment source config-zip -g ${{ inputs.AZURE_RESOURCE_GROUP }} -n ${{ inputs.LA_NAME }} --src './deploy/logic.zip'
+
+      - name: Update Logic App Settings
+        run: |
+          az functionapp config appsettings set --name ${{ inputs.LA_NAME }} --resource-group  ${{ inputs.AZURE_RESOURCE_GROUP }} --output none --settings @./deploy/settings/appsettings.${{ inputs.GITHUB_ENVIRONMENT }}.json
+      
+      - name: Swap connection files 
+        run: |
+          az functionapp deploy --resource-group ${{ inputs.AZURE_RESOURCE_GROUP }} --name ${{ inputs.LA_NAME }} --src-path  ./deploy/settings/connections.${{ inputs.GITHUB_ENVIRONMENT }}.json --type static --target-path connections.json
+
+      - name: Swap parameter files 
+        run: |
+          az functionapp deploy --resource-group ${{ inputs.AZURE_RESOURCE_GROUP }} --name ${{ inputs.LA_NAME }} --src-path  ./deploy/settings/parameters.${{ inputs.GITHUB_ENVIRONMENT }}.json --type static --target-path parameters.json
+
+      - name: Azure CLI Logout
+        if: always()
+        run: |
+          az logout
