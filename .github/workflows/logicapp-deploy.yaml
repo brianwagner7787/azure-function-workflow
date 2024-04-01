@@ -35,8 +35,7 @@ on:
         value: ${{ jobs.deploy_logicapp.outputs.secrets }}
 jobs:
   deploy_logicapp: 
-    # The type of runner that the job will run on
-    runs-on: [ self-hosted ]
+    runs-on: [ ubuntu-latest ]
     environment: "${{ inputs.GITHUB_ENVIRONMENT }}"
 
     outputs:
